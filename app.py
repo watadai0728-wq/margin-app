@@ -3,10 +3,10 @@ import pytesseract
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from PIL import Image, ImageOps, ImageEnhance
-st.set_page_config(page_title="Margin OCR Analyzer", layout="wide")
-st.title("信用買残 スクショ画像分析")
-uploaded_files = st.file_uploader("証券画面のスクショ画像（複数枚まとめて選択可）", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+from PIL import Image
+st.set_page_config(page_title="Margin Vintage Analyzer", layout="wide")
+st.title("信用買残 ヴィンテージ分析")
+uploaded_files = st.file_uploader("証券画面のスクショ画像（複数可）", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 sample_text = """26/10/02 2575.9 41467.7
 26/10/05 2056.6 42876.9
 26/10/06 1565.1 42086.1
@@ -31,21 +31,46 @@ sample_text = """26/10/02 2575.9 41467.7
 26/11/04 1243.7 53575.5
 26/11/05 1415.6 54163.1
 26/11/06 1272.1 50146.4"""
-ocr_texts = [pytesseract.image_to_string(ImageOps.grayscale(Image.open(f).resize((Image.open(f).width * 2, Image.open(f).height * 2)))) for f in uploaded_files] if uploaded_files else []
-combined_raw = "\n".join(ocr_texts) if len(ocr_texts) > 0 else sample_text
-lines = combined_raw.splitlines()
-clean_lines = [re.sub(r"[^\d/.\s,-]", " ", l).strip() for l in lines]
-parsed = [re.findall(r"(\d{2})/.-/.-\s+([0-9,.]+)\s+([0-9,.]+)", l) for l in clean_lines]
-flat_matches = [m[0] for m in parsed if len(m) > 0]
-valid_rows = [m for m in flat_matches if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
-dates = [pd.to_datetime("20" + str(m[0]) + "-" + str(m[1]).zfill(2) + "-" + str(m[2]).zfill(2)) for m in valid_rows]
-sells = [float(m[3].replace(",", "")) * 1000 for m in valid_rows]
-buys = [float(m[4].replace(",", "")) * 1000 for m in valid_rows]
-df_raw = pd.DataFrame({"Date": dates, "Sell": sells, "Buy": buys}) if len(dates) > 0 else pd.DataFrame({"Date": [pd.to_datetime("2026-11-06")], "Sell": [1272100.0], "Buy": [50146400.0]})
-df = df_raw.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+st.write("またはテキストを直接貼り付け（iPhoneの写真から長押しコピーした文字など）：")
+raw_input = st.text_area("テキスト入力", value="", height=120, placeholder="26/11/06 1272.1 50146.4 のように貼り付け")
+ocr_lines = []
+ocr_debug = ""
+if uploaded_files:
+for f in uploaded_files:
+try:
+img = Image.open(f).convert("L")
+txt = pytesseract.image_to_string(img, config="--psm 6")
+ocr_debug += "\n" + txt
+for l in txt.splitlines():
+ocr_lines.append(l)
+except Exception as e:
+pass
+target_text = raw_input if len(raw_input.strip()) > 0 else ("\n".join(ocr_lines) if len(ocr_lines) > 0 else sample_text)
+parsed_records = []
+for line in target_text.splitlines():
+m = re.search(r"(\d{2})/.-/.-\s+([0-9,.]+)\s+([0-9,.]+)", line)
+if m:
+try:
+d_str = "20" + m.group(1) + "-" + m.group(2).zfill(2) + "-" + m.group(3).zfill(2)
+s_val = float(m.group(4).replace(",", "")) * 1000
+b_val = float(m.group(5).replace(",", "")) * 1000
+parsed_records.append({"Date": pd.to_datetime(d_str), "Sell": s_val, "Buy": b_val})
+except:
+pass
+if len(parsed_records) > 0:
+df = pd.DataFrame(parsed_records).drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+else:
+fallback_lines = sample_text.splitlines()
+fb_records = []
+for l in fallback_lines:
+pts = l.split()
+fb_records.append({"Date": pd.to_datetime("20" + pts[0].replace("/", "-")), "Sell": float(pts[1])*1000, "Buy": float(pts[2])*1000})
+df = pd.DataFrame(fb_records).sort_values("Date").reset_index(drop=True)
+if uploaded_files and len(raw_input.strip()) == 0:
+st.warning("画像からの数字認識が正確に行えなかったため、サンプルデータを表示しています。下のテキスト枠にコピーした文字を貼り付けてみてください。")
 df["Delta"] = df["Buy"].diff().fillna(0)
 slider_max = max(1, len(df) - 1)
-target_idx = st.slider("分析基準日", 0, slider_max, slider_max) if len(df) > 1 else 0
+target_idx = st.slider("分析基準日", 0, slider_max, slider_max)
 curr_date = df.loc[target_idx, "Date"].strftime("%Y-%m-%d")
 curr_buy = int(df.loc[target_idx, "Buy"])
 curr_sell = int(df.loc[target_idx, "Sell"])
@@ -57,12 +82,12 @@ col2.metric("総信用売残", f"{curr_sell:,}" + " 株", str(ratio_val) + "倍"
 sub_df = df.loc[:target_idx].copy()
 sub_df["DaysAgo"] = (df.loc[target_idx, "Date"] - sub_df["Date"]).dt.days
 pos_deltas = sub_df["Delta"].clip(lower=0)
-v_recent = int(pos_deltas[sub_df["DaysAgo"] <= 14].sum())
-v_1m = int(pos_deltas[(sub_df["DaysAgo"] > 14) & (sub_df["DaysAgo"] <= 45)].sum())
-v_3m = int(pos_deltas[(sub_df["DaysAgo"] > 45) & (sub_df["DaysAgo"] <= 100)].sum())
+v_recent = int(pos_deltas[sub_df["DaysAgo"] <= 7].sum())
+v_1m = int(pos_deltas[(sub_df["DaysAgo"] > 7) & (sub_df["DaysAgo"] <= 30)].sum())
+v_3m = int(pos_deltas[(sub_df["DaysAgo"] > 30) & (sub_df["DaysAgo"] <= 90)].sum())
 v_accounted = v_recent + v_1m + v_3m
 v_old = max(0, curr_buy - v_accounted)
-periods = ["直近2週以内 (短期勢)", "2週〜1.5ヶ月前", "1.5〜3ヶ月前", "それ以前 (塩漬け・期日接近)"]
+periods = ["直近1週以内", "1週〜1ヶ月前", "1〜3ヶ月前", "それ以前 (塩漬け・期日接近)"]
 volumes = [min(v_recent, curr_buy), min(v_1m, max(0, curr_buy - v_recent)), min(v_3m, max(0, curr_buy - v_recent - v_1m)), v_old]
 colors = ["#2ecc71", "#3498db", "#f39c12", "#e74c3c"]
 labels = [f"{v:,}株 (" + str(round(v/curr_buy*100, 1) if curr_buy > 0 else 0) + "%)" for v in volumes]
@@ -75,11 +100,9 @@ textposition="auto"
 ))
 fig.update_layout(height=420, margin=dict(l=20, r=20, t=30, b=20), yaxis_title="株数")
 st.plotly_chart(fig, use_container_width=True)
-st.write("▼ 読み取りデータ件数：全 " + str(len(df)) + " 営業日分（自動ソート・結合済）")
+st.write("▼ 読み込み済みデータ（全 " + str(len(df)) + " 営業日分）")
 df_display = df.copy()
 df_display["Date"] = df_display["Date"].dt.strftime("%Y-%m-%d")
 df_display["Buy"] = df_display["Buy"].apply(lambda x: f"{int(x):,}")
 df_display["Sell"] = df_display["Sell"].apply(lambda x: f"{int(x):,}")
 st.dataframe(df_display[["Date", "Sell", "Buy"]], use_container_width=True)
-exp = st.expander("OCRテキスト読取結果の生データ確認（トラブルシューティング用）")
-exp.text(combined_raw[:2000])
