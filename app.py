@@ -163,9 +163,9 @@ fig = go.Figure(data=[
 fig.update_layout(barmode="stack", height=420, template="plotly_dark", yaxis_title="株数")
 st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("### 📋 入力データ一覧")
-st.dataframe(sub_df[["Date", "MarginSell", "MarginBuy", "Buy_Diff"]].tail(15), use_container_width=True)
+st.markdown("### 🎚️ 分析基準日の切り替え")
+st.slider("グラフを見ながら日付を遡れます", min_value=0, max_value=slider_max, value=target_idx, key="target_idx")
 
 st.markdown("---")
-st.markdown("### 🎚️ 分析基準日の切り替え")
-st.slider("表やグラフを過去の日付へ遡って確認できます", min_value=0, max_value=slider_max, value=target_idx, key="target_idx")
+st.markdown("### 📋 入力データ一覧")
+st.dataframe(sub_df[["Date", "MarginSell", "MarginBuy", "Buy_Diff"]].tail(15), use_container_width=True)
