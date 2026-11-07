@@ -36,24 +36,21 @@ combined_raw = "\n".join(texts) if len(texts) > 0 else sample_text
 lines = combined_raw.splitlines()
 parsed = [re.findall(r"(\d{2})/.-/.-\s+([0-9,.]+)\s+([0-9,.]+)", re.sub(r"[^\d/.\s,-]", " ", l)) for l in lines]
 matched = [m[0] for m in parsed if len(m) > 0]
-def parse_num(s):
-try:
-return float(s.replace(",", "")) * 1000
-except:
-return None
-clean_data = [{"Date": pd.to_datetime(f"20{m[0]}-{int(m[1]):02d}-{int(m[2]):02d}"), "Sell": parse_num(m[3]), "Buy": parse_num(m[4])} for m in matched if parse_num(m[3]) is not None and parse_num(m[4]) is not None]
-df_raw = pd.DataFrame(clean_data) if len(clean_data) > 0 else pd.DataFrame({"Date": [pd.to_datetime("2026-11-06")], "Sell": [1272100.0], "Buy": [50146400.0]})
+dates = [pd.to_datetime("20" + str(m[0]) + "-" + str(m[1]).zfill(2) + "-" + str(m[2]).zfill(2)) for m in matched if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
+sells = [float(m[3].replace(",", "")) * 1000 for m in matched if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
+buys = [float(m[4].replace(",", "")) * 1000 for m in matched if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
+df_raw = pd.DataFrame({"Date": dates, "Sell": sells, "Buy": buys}) if len(dates) > 0 else pd.DataFrame({"Date": [pd.to_datetime("2026-11-06")], "Sell": [1272100.0], "Buy": [50146400.0]})
 df = df_raw.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 df["Delta"] = df["Buy"].diff().fillna(0)
 target_idx = st.slider("分析基準日", 0, len(df)-1, len(df)-1)
 curr_date = df.loc[target_idx, "Date"].strftime("%Y-%m-%d")
 curr_buy = int(df.loc[target_idx, "Buy"])
 curr_sell = int(df.loc[target_idx, "Sell"])
-st.subheader(f"基準日: {curr_date} (総買残: {curr_buy:,} 株)")
+st.subheader("基準日: " + curr_date + " (総買残: " + f"{curr_buy:,}" + " 株)")
 col1, col2 = st.columns(2)
-col1.metric("総信用買残", f"{curr_buy:,} 株")
-ratio_str = f"{round(curr_buy/curr_sell, 1)}倍" if curr_sell > 0 else ""
-col2.metric("総信用売残", f"{curr_sell:,}" + " 株", ratio_str)
+col1.metric("総信用買残", f"{curr_buy:,}" + " 株")
+ratio_val = round(curr_buy / curr_sell, 1) if curr_sell > 0 else 0
+col2.metric("総信用売残", f"{curr_sell:,}" + " 株", str(ratio_val) + "倍")
 sub_df = df.loc[:target_idx].copy()
 sub_df["DaysAgo"] = (df.loc[target_idx, "Date"] - sub_df["Date"]).dt.days
 pos_deltas = sub_df["Delta"].clip(lower=0)
@@ -65,7 +62,7 @@ v_old = max(0, curr_buy - v_accounted)
 periods = ["直近2週以内 (短期勢)", "2週〜1.5ヶ月前", "1.5〜3ヶ月前", "それ以前 (塩漬け・期日接近)"]
 volumes = [min(v_recent, curr_buy), min(v_1m, max(0, curr_buy - v_recent)), min(v_3m, max(0, curr_buy - v_recent - v_1m)), v_old]
 colors = ["#2ecc71", "#3498db", "#f39c12", "#e74c3c"]
-labels = [f"{v:,}株 ({round(v/curr_buy*100, 1)}%)" if curr_buy > 0 else "0株" for v in volumes]
+labels = [f"{v:,}株 (" + str(round(v/curr_buy*100, 1) if curr_buy > 0 else 0) + "%)" for v in volumes]
 fig = go.Figure(go.Bar(
 x=periods,
 y=volumes,
@@ -75,7 +72,7 @@ textposition="auto"
 ))
 fig.update_layout(height=420, margin=dict(l=20, r=20, t=30, b=20), yaxis_title="株数")
 st.plotly_chart(fig, use_container_width=True)
-st.write(f"▼ データ件数：全 {len(df)} 営業日分（自動ソート・結合済）")
+st.write("▼ データ件数：全 " + str(len(df)) + " 営業日分（自動ソート・結合済）")
 df_display = df.copy()
 df_display["Date"] = df_display["Date"].dt.strftime("%Y-%m-%d")
 df_display["Buy"] = df_display["Buy"].apply(lambda x: f"{int(x):,}")
