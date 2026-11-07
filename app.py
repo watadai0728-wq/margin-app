@@ -31,43 +31,24 @@ sample_text = """26/10/02 2575.9 41467.7
 26/11/04 1243.7 53575.5
 26/11/05 1415.6 54163.1
 26/11/06 1272.1 50146.4"""
-st.write("またはテキストを直接貼り付け（iPhoneの写真から長押しコピーした文字など）：")
-raw_input = st.text_area("テキスト入力", value="", height=120, placeholder="26/11/06 1272.1 50146.4 のように貼り付け")
-ocr_lines = []
-ocr_debug = ""
-if uploaded_files:
-for f in uploaded_files:
-try:
-img = Image.open(f).convert("L")
-txt = pytesseract.image_to_string(img, config="--psm 6")
-ocr_debug += "\n" + txt
-for l in txt.splitlines():
-ocr_lines.append(l)
-except Exception as e:
-pass
-target_text = raw_input if len(raw_input.strip()) > 0 else ("\n".join(ocr_lines) if len(ocr_lines) > 0 else sample_text)
-parsed_records = []
-for line in target_text.splitlines():
-m = re.search(r"(\d{2})/.-/.-\s+([0-9,.]+)\s+([0-9,.]+)", line)
-if m:
-try:
-d_str = "20" + m.group(1) + "-" + m.group(2).zfill(2) + "-" + m.group(3).zfill(2)
-s_val = float(m.group(4).replace(",", "")) * 1000
-b_val = float(m.group(5).replace(",", "")) * 1000
-parsed_records.append({"Date": pd.to_datetime(d_str), "Sell": s_val, "Buy": b_val})
-except:
-pass
-if len(parsed_records) > 0:
-df = pd.DataFrame(parsed_records).drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
-else:
-fallback_lines = sample_text.splitlines()
-fb_records = []
-for l in fallback_lines:
-pts = l.split()
-fb_records.append({"Date": pd.to_datetime("20" + pts[0].replace("/", "-")), "Sell": float(pts[1])*1000, "Buy": float(pts[2])*1000})
-df = pd.DataFrame(fb_records).sort_values("Date").reset_index(drop=True)
-if uploaded_files and len(raw_input.strip()) == 0:
-st.warning("画像からの数字認識が正確に行えなかったため、サンプルデータを表示しています。下のテキスト枠にコピーした文字を貼り付けてみてください。")
+st.write("またはテキスト直接貼り付け（iPhoneで写真の文字を長押しコピーしたものなど）：")
+raw_input = st.text_area("テキスト入力", value="", height=100, placeholder="26/11/06 1272.1 50146.4 のように貼り付け")
+ocr_texts = [pytesseract.image_to_string(Image.open(f).convert("L"), config="--psm 6") for f in (uploaded_files if uploaded_files else [])]
+all_ocr_str = "\n".join(ocr_texts)
+target_text = raw_input if len(raw_input.strip()) > 0 else (all_ocr_str if len(all_ocr_str.strip()) > 0 else sample_text)
+raw_matches = [re.search(r"(\d{2})/.-/.-\s+([0-9,.]+)\s+([0-9,.]+)", l) for l in target_text.splitlines()]
+valid_matches = [m for m in raw_matches if m is not None]
+dates = ["20" + m.group(1) + "-" + m.group(2).zfill(2) + "-" + m.group(3).zfill(2) for m in valid_matches]
+sells = [float(m.group(4).replace(",", "")) * 1000 for m in valid_matches]
+buys = [float(m.group(5).replace(",", "")) * 1000 for m in valid_matches]
+parsed_df = pd.DataFrame({"Date": pd.to_datetime(dates), "Sell": sells, "Buy": buys}) if len(valid_matches) > 0 else pd.DataFrame(columns=["Date", "Sell", "Buy"])
+fallback_lines = [l.split() for l in sample_text.splitlines()]
+fb_df = pd.DataFrame({
+"Date": [pd.to_datetime("20" + p[0].replace("/", "-")) for p in fallback_lines],
+"Sell": [float(p[1]) * 1000 for p in fallback_lines],
+"Buy": [float(p[2]) * 1000 for p in fallback_lines]
+})
+df = parsed_df.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True) if len(parsed_df) > 0 else fb_df
 df["Delta"] = df["Buy"].diff().fillna(0)
 slider_max = max(1, len(df) - 1)
 target_idx = st.slider("分析基準日", 0, slider_max, slider_max)
@@ -91,13 +72,7 @@ periods = ["直近1週以内", "1週〜1ヶ月前", "1〜3ヶ月前", "それ以
 volumes = [min(v_recent, curr_buy), min(v_1m, max(0, curr_buy - v_recent)), min(v_3m, max(0, curr_buy - v_recent - v_1m)), v_old]
 colors = ["#2ecc71", "#3498db", "#f39c12", "#e74c3c"]
 labels = [f"{v:,}株 (" + str(round(v/curr_buy*100, 1) if curr_buy > 0 else 0) + "%)" for v in volumes]
-fig = go.Figure(go.Bar(
-x=periods,
-y=volumes,
-marker_color=colors,
-text=labels,
-textposition="auto"
-))
+fig = go.Figure(go.Bar(x=periods, y=volumes, marker_color=colors, text=labels, textposition="auto"))
 fig.update_layout(height=420, margin=dict(l=20, r=20, t=30, b=20), yaxis_title="株数")
 st.plotly_chart(fig, use_container_width=True)
 st.write("▼ 読み込み済みデータ（全 " + str(len(df)) + " 営業日分）")
