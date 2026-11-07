@@ -90,60 +90,48 @@ df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d")
 df = df.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 df["Buy_Diff"] = df["MarginBuy"].diff().fillna(0)
 
-slider_max = max(1, len(df) - 1)
-target_idx = st.session_state.get("target_idx", slider_max)
-target_idx = min(target_idx, slider_max)
+# 全日程のヴィンテージ数値を一括事前計算
+all_recent = [min(df.loc[i, "MarginBuy"], df.loc[max(0, i-2):i, "Buy_Diff"].apply(lambda x: max(0.0, x)).sum()) for i in range(len(df))]
+all_mid_add = [df.loc[max(0, i-9):i, "Buy_Diff"].apply(lambda x: max(0.0, x)).sum() for i in range(len(df))]
+all_mid = [min(df.loc[i, "MarginBuy"] - all_recent[i], max(0.0, all_mid_add[i] - df.loc[max(0, i-2):i, "Buy_Diff"].apply(lambda x: max(0.0, x)).sum())) for i in range(len(df))]
+all_old_add = [df.loc[max(0, i-21):i, "Buy_Diff"].apply(lambda x: max(0.0, x)).sum() for i in range(len(df))]
+all_old = [min(df.loc[i, "MarginBuy"] - all_recent[i] - all_mid[i], max(0.0, all_old_add[i] - all_mid_add[i])) for i in range(len(df))]
+all_stale = [max(0.0, df.loc[i, "MarginBuy"] - (all_recent[i] + all_mid[i] + all_old[i])) for i in range(len(df))]
 
-sub_df = df.iloc[:target_idx + 1].copy()
-cur_row = sub_df.iloc[-1]
+last_idx = len(df) - 1
+cur_row = df.iloc[-1]
 cur_buy = cur_row["MarginBuy"]
 cur_sell = cur_row["MarginSell"]
 cur_ratio = round(cur_buy / max(1.0, cur_sell), 2)
 cur_date_str = cur_row["Date"].strftime("%Y-%m-%d")
 latest_buy_diff = cur_row["Buy_Diff"]
 
-recent_3days_add = sub_df.iloc[-3:]["Buy_Diff"].apply(lambda x: max(0.0, x)).sum()
-recent_14days_add = sub_df.iloc[-10:]["Buy_Diff"].apply(lambda x: max(0.0, x)).sum()
-recent_30days_add = sub_df.iloc[-22:]["Buy_Diff"].apply(lambda x: max(0.0, x)).sum()
-
-v_recent = min(cur_buy, recent_3days_add)
-v_mid = min(cur_buy - v_recent, max(0.0, recent_14days_add - recent_3days_add))
-v_old = min(cur_buy - v_recent - v_mid, max(0.0, recent_30days_add - recent_14days_add))
-v_stale = max(0.0, cur_buy - (v_recent + v_mid + v_old))
-
-pct_recent = round(v_recent / max(1.0, cur_buy) * 100, 1)
-pct_mid = round(v_mid / max(1.0, cur_buy) * 100, 1)
-pct_old = round(v_old / max(1.0, cur_buy) * 100, 1)
-pct_stale = round(v_stale / max(1.0, cur_buy) * 100, 1)
-
-peak_buy_idx = sub_df["MarginBuy"].idxmax()
-peak_row = sub_df.loc[peak_buy_idx]
+peak_buy_idx = df["MarginBuy"].idxmax()
+peak_row = df.loc[peak_buy_idx]
 peak_date = peak_row["Date"]
 peak_buy = peak_row["MarginBuy"]
 days_from_peak = (cur_row["Date"] - peak_date).days
 due_date = peak_date + pd.DateOffset(months=6)
 
-avg_buy = sub_df["MarginBuy"].mean()
+avg_buy = df["MarginBuy"].mean()
 is_panic_drop = latest_buy_diff < -(avg_buy * 0.08)
 is_near_due = (140 <= days_from_peak <= 190)
 
 status_title = "🟢 需給正常・推移観察"
 status_msg = "急激な投げ売りや期日集中シグナルは現在検知されていません。"
-
 status_title = "⚠️ 【セリクラ警戒】6ヶ月期日の集中接近中" if is_near_due else status_title
 status_msg = "買残ピーク（" + peak_date.strftime("%Y/%m/%d") + "）から約" + str(days_from_peak) + "日が経過。6ヶ月期日強制決済（" + due_date.strftime("%Y/%m/%d") + " 前後）に伴う処分売りに警戒が必要です。" if is_near_due else status_msg
-
 status_title = "🔥 【セリクラ発生中】大底・底入れ接近シグナル" if is_panic_drop else status_title
 status_msg = "直近で買残の大幅な急減（" + f"{int(latest_buy_diff):,}" + "株）を検知。個人投資家のパニック投げ売り・追証整理が進行しており、需給の大底形成シグナルです。" if is_panic_drop else status_msg
 
 st.markdown("---")
-st.markdown("## 🎯 セリクラ（大底）シグナル判定")
+st.markdown("## 🎯 セリクラ（大底）シグナル判定（最新基準）")
 st.markdown("#### " + status_title)
 st.write(status_msg)
 
 st.markdown("---")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("分析基準日", cur_date_str)
+c1.metric("最新基準日", cur_date_str)
 c2.metric("総信用買残", f"{int(cur_buy):,} 株")
 c3.metric("総信用売残", f"{int(cur_sell):,} 株")
 c4.metric("信用倍率", f"{cur_ratio} 倍")
@@ -153,19 +141,54 @@ col_p1, col_p2 = st.columns(2)
 col_p1.metric("買残ピーク日", peak_date.strftime("%Y-%m-%d"), f"ピーク株数: {int(peak_buy):,} 株")
 col_p2.metric("6ヶ月強制決済期日", due_date.strftime("%Y-%m-%d"), f"ピークから {days_from_peak} 日経過")
 
-st.markdown("### 📊 建玉ヴィンテージ比率（年齢・しこり構成）")
-fig = go.Figure(data=[
-    go.Bar(name="直近3日以内 (短期・新規)", x=["買残内訳"], y=[v_recent], text=[str(pct_recent) + "%"], textposition="auto", marker_color="#2ecc71"),
-    go.Bar(name="4日〜2週間 (中期玉)", x=["買残内訳"], y=[v_mid], text=[str(pct_mid) + "%"], textposition="auto", marker_color="#f1c40f"),
-    go.Bar(name="2週間〜1ヶ月 (捕まりかけ玉)", x=["買残内訳"], y=[v_old], text=[str(pct_old) + "%"], textposition="auto", marker_color="#e67e22"),
-    go.Bar(name="1ヶ月以上前 (塩漬け・しこり玉)", x=["買残内訳"], y=[v_stale], text=[str(pct_stale) + "%"], textposition="auto", marker_color="#e74c3c")
-])
-fig.update_layout(barmode="stack", height=420, template="plotly_dark", yaxis_title="株数")
-st.plotly_chart(fig, use_container_width=True)
+st.markdown("### 📊 建玉ヴィンテージ比率（ぬるぬるシークバー内蔵）")
 
-st.markdown("### 🎚️ 分析基準日の切り替え")
-st.slider("グラフを見ながら日付を遡れます", min_value=0, max_value=slider_max, value=target_idx, key="target_idx")
+date_labels = [d.strftime("%m/%d") for d in df["Date"]]
+
+# Plotlyのクライアントサイド・アニメーションフレーム（ブラウザ側で即座に動く）
+frames = [go.Frame(data=[
+    go.Bar(y=[all_recent[k]], text=[f"{round(all_recent[k]/max(1.0, df.loc[k, 'MarginBuy'])*100, 1)}%"]),
+    go.Bar(y=[all_mid[k]], text=[f"{round(all_mid[k]/max(1.0, df.loc[k, 'MarginBuy'])*100, 1)}%"]),
+    go.Bar(y=[all_old[k]], text=[f"{round(all_old[k]/max(1.0, df.loc[k, 'MarginBuy'])*100, 1)}%"]),
+    go.Bar(y=[all_stale[k]], text=[f"{round(all_stale[k]/max(1.0, df.loc[k, 'MarginBuy'])*100, 1)}%"])
+], name=str(k), layout=go.Layout(title=f"基準日: {df.loc[k, 'Date'].strftime('%Y-%m-%d')} (総買残: {int(df.loc[k, 'MarginBuy']):,}株)")) for k in range(len(df))]
+
+slider_steps = [{"args": [[str(k)], {"frame": {"duration": 0, "redraw": True}, "mode": "immediate", "transition": {"duration": 0}}], "label": date_labels[k], "method": "animate"} for k in range(len(df))]
+
+fig = go.Figure(
+    data=[
+        go.Bar(name="直近3日以内 (短期・新規)", x=["買残内訳"], y=[all_recent[-1]], text=[f"{round(all_recent[-1]/max(1.0, cur_buy)*100, 1)}%"], textposition="auto", marker_color="#2ecc71"),
+        go.Bar(name="4日〜2週間 (中期玉)", x=["買残内訳"], y=[all_mid[-1]], text=[f"{round(all_mid[-1]/max(1.0, cur_buy)*100, 1)}%"], textposition="auto", marker_color="#f1c40f"),
+        go.Bar(name="2週間〜1ヶ月 (捕まりかけ玉)", x=["買残内訳"], y=[all_old[-1]], text=[f"{round(all_old[-1]/max(1.0, cur_buy)*100, 1)}%"], textposition="auto", marker_color="#e67e22"),
+        go.Bar(name="1ヶ月以上前 (塩漬け・しこり玉)", x=["買残内訳"], y=[all_stale[-1]], text=[f"{round(all_stale[-1]/max(1.0, cur_buy)*100, 1)}%"], textposition="auto", marker_color="#e74c3c")
+    ],
+    frames=frames
+)
+
+max_y = df["MarginBuy"].max() * 1.15
+fig.update_layout(
+    barmode="stack",
+    height=480,
+    template="plotly_dark",
+    yaxis_title="株数",
+    yaxis_range=[0, max_y],
+    title=f"基準日: {cur_date_str} (総買残: {int(cur_buy):,}株)",
+    sliders=[{
+        "active": last_idx,
+        "yanchor": "top",
+        "xanchor": "left",
+        "currentvalue": {"font": {"size": 13, "color": "#00e676"}, "prefix": "📅 選択日付: ", "visible": True, "xanchor": "right"},
+        "transition": {"duration": 0},
+        "pad": {"b": 10, "t": 30},
+        "len": 1.0,
+        "x": 0.0,
+        "y": 0,
+        "steps": slider_steps
+    }]
+)
+
+st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
 st.markdown("### 📋 入力データ一覧")
-st.dataframe(sub_df[["Date", "MarginSell", "MarginBuy", "Buy_Diff"]].tail(15), use_container_width=True)
+st.dataframe(df[["Date", "MarginSell", "MarginBuy", "Buy_Diff"]].tail(15), use_container_width=True)
