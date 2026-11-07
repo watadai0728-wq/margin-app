@@ -3,7 +3,7 @@ import pytesseract
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from PIL import Image
+from PIL import Image, ImageOps, ImageEnhance
 st.set_page_config(page_title="Margin OCR Analyzer", layout="wide")
 st.title("信用買残 スクショ画像分析")
 uploaded_files = st.file_uploader("証券画面のスクショ画像（複数枚まとめて選択可）", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
@@ -31,18 +31,21 @@ sample_text = """26/10/02 2575.9 41467.7
 26/11/04 1243.7 53575.5
 26/11/05 1415.6 54163.1
 26/11/06 1272.1 50146.4"""
-texts = [pytesseract.image_to_string(Image.open(f)) for f in uploaded_files] if uploaded_files else []
-combined_raw = "\n".join(texts) if len(texts) > 0 else sample_text
+ocr_texts = [pytesseract.image_to_string(ImageOps.grayscale(Image.open(f).resize((Image.open(f).width * 2, Image.open(f).height * 2)))) for f in uploaded_files] if uploaded_files else []
+combined_raw = "\n".join(ocr_texts) if len(ocr_texts) > 0 else sample_text
 lines = combined_raw.splitlines()
-parsed = [re.findall(r"(\d{2})/.-/.-\s+([0-9,.]+)\s+([0-9,.]+)", re.sub(r"[^\d/.\s,-]", " ", l)) for l in lines]
-matched = [m[0] for m in parsed if len(m) > 0]
-dates = [pd.to_datetime("20" + str(m[0]) + "-" + str(m[1]).zfill(2) + "-" + str(m[2]).zfill(2)) for m in matched if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
-sells = [float(m[3].replace(",", "")) * 1000 for m in matched if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
-buys = [float(m[4].replace(",", "")) * 1000 for m in matched if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
+clean_lines = [re.sub(r"[^\d/.\s,-]", " ", l).strip() for l in lines]
+parsed = [re.findall(r"(\d{2})/.-/.-\s+([0-9,.]+)\s+([0-9,.]+)", l) for l in clean_lines]
+flat_matches = [m[0] for m in parsed if len(m) > 0]
+valid_rows = [m for m in flat_matches if m[3].replace(",", "").replace(".", "").isdigit() and m[4].replace(",", "").replace(".", "").isdigit()]
+dates = [pd.to_datetime("20" + str(m[0]) + "-" + str(m[1]).zfill(2) + "-" + str(m[2]).zfill(2)) for m in valid_rows]
+sells = [float(m[3].replace(",", "")) * 1000 for m in valid_rows]
+buys = [float(m[4].replace(",", "")) * 1000 for m in valid_rows]
 df_raw = pd.DataFrame({"Date": dates, "Sell": sells, "Buy": buys}) if len(dates) > 0 else pd.DataFrame({"Date": [pd.to_datetime("2026-11-06")], "Sell": [1272100.0], "Buy": [50146400.0]})
 df = df_raw.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 df["Delta"] = df["Buy"].diff().fillna(0)
-target_idx = st.slider("分析基準日", 0, len(df)-1, len(df)-1)
+slider_max = max(1, len(df) - 1)
+target_idx = st.slider("分析基準日", 0, slider_max, slider_max) if len(df) > 1 else 0
 curr_date = df.loc[target_idx, "Date"].strftime("%Y-%m-%d")
 curr_buy = int(df.loc[target_idx, "Buy"])
 curr_sell = int(df.loc[target_idx, "Sell"])
@@ -72,9 +75,11 @@ textposition="auto"
 ))
 fig.update_layout(height=420, margin=dict(l=20, r=20, t=30, b=20), yaxis_title="株数")
 st.plotly_chart(fig, use_container_width=True)
-st.write("▼ データ件数：全 " + str(len(df)) + " 営業日分（自動ソート・結合済）")
+st.write("▼ 読み取りデータ件数：全 " + str(len(df)) + " 営業日分（自動ソート・結合済）")
 df_display = df.copy()
 df_display["Date"] = df_display["Date"].dt.strftime("%Y-%m-%d")
 df_display["Buy"] = df_display["Buy"].apply(lambda x: f"{int(x):,}")
 df_display["Sell"] = df_display["Sell"].apply(lambda x: f"{int(x):,}")
 st.dataframe(df_display[["Date", "Sell", "Buy"]], use_container_width=True)
+exp = st.expander("OCRテキスト読取結果の生データ確認（トラブルシューティング用）")
+exp.text(combined_raw[:2000])
