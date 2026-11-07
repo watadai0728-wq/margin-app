@@ -5,24 +5,24 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 st.set_page_config(page_title="信用買残ヴィンテージ分析ツール", layout="wide")
 st.title("信用買残 ヴィンテージ（形成時期）分析ツール")
-st.markdown("""
-公表される信用買残の推移から、「現在の買残がいつ建てられたものか」をFIFO（先入先出）モデルで逆算・推定します。
-""")
+st.caption("公表される信用買残の推移から、現在の買残がいつ建てられたものかをFIFO（先入先出）モデルで逆算・推定します。")
 st.sidebar.header("設定 & データ")
 data_source = st.sidebar.radio("データソース", ["デモ用サンプルデータを生成", "CSVをアップロード"])
-df = None
-if data_source == "デモ用サンプルデータを生成":
+def make_demo_data():
 dates = pd.date_range(end=pd.Timestamp.today(), periods=52, freq="W-FRI")
 np.random.seed(42)
 price_changes = np.random.normal(loc=0.002, scale=0.03, size=len(dates))
 price = 1000 * np.cumprod(1 + price_changes)
 margin_buy = 500000 + np.cumsum(np.random.normal(loc=5000, scale=30000, size=len(dates)))
 margin_buy = np.maximum(margin_buy, 100000)
-df = pd.DataFrame({
+return pd.DataFrame({
 "Date": dates,
 "Close": np.round(price, 1),
 "MarginBuy": np.round(margin_buy).astype(int)
 })
+df = None
+if data_source == "デモ用サンプルデータを生成":
+df = make_demo_data()
 st.sidebar.success("サンプルデータを読み込みました")
 else:
 uploaded_file = st.sidebar.file_uploader("CSVファイルをアップロード", type=["csv"])
