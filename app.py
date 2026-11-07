@@ -74,6 +74,7 @@ parsed_buys = [float(m[2].replace(",", "")) * 1000 for m in raw_matches]
 df = pd.DataFrame({"Date": parsed_dates, "MarginSell": parsed_sells, "MarginBuy": parsed_buys})
 df["Date"] = pd.to_datetime(df["Date"], format="mixed")
 df = df.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+df["Buy_Diff"] = df["MarginBuy"].diff().fillna(0)
 
 slider_max = max(1, len(df) - 1)
 target_idx = st.slider("分析基準日（スライダーで過去日へ遡れます）", min_value=0, max_value=slider_max, value=slider_max)
@@ -84,9 +85,8 @@ cur_buy = cur_row["MarginBuy"]
 cur_sell = cur_row["MarginSell"]
 cur_ratio = round(cur_buy / max(1.0, cur_sell), 2)
 cur_date_str = cur_row["Date"].strftime("%Y-%m-%d")
+latest_buy_diff = cur_row["Buy_Diff"]
 
-# 増減の算出
-sub_df["Buy_Diff"] = sub_df["MarginBuy"].diff().fillna(0)
 recent_3days_add = sub_df.iloc[-3:]["Buy_Diff"].apply(lambda x: max(0.0, x)).sum()
 recent_14days_add = sub_df.iloc[-10:]["Buy_Diff"].apply(lambda x: max(0.0, x)).sum()
 recent_30days_add = sub_df.iloc[-22:]["Buy_Diff"].apply(lambda x: max(0.0, x)).sum()
@@ -101,7 +101,6 @@ pct_mid = round(v_mid / max(1.0, cur_buy) * 100, 1)
 pct_old = round(v_old / max(1.0, cur_buy) * 100, 1)
 pct_stale = round(v_stale / max(1.0, cur_buy) * 100, 1)
 
-# セリクラ判定ロジック
 peak_buy_idx = sub_df["MarginBuy"].idxmax()
 peak_row = sub_df.loc[peak_buy_idx]
 peak_date = peak_row["Date"]
@@ -109,22 +108,18 @@ peak_buy = peak_row["MarginBuy"]
 days_from_peak = (cur_row["Date"] - peak_date).days
 due_date = peak_date + pd.DateOffset(months=6)
 
-latest_buy_diff = cur_row["Buy_Diff"]
 avg_buy = sub_df["MarginBuy"].mean()
 is_panic_drop = latest_buy_diff < -(avg_buy * 0.08)
 is_near_due = (140 <= days_from_peak <= 190)
 
 status_title = "🟢 需給正常・推移観察"
 status_msg = "急激な投げ売りや期日集中シグナルは現在検知されていません。"
-status_type = "info"
 
 status_title = "⚠️ 【セリクラ警戒】6ヶ月期日の集中接近中" if is_near_due else status_title
 status_msg = "買残ピーク（" + peak_date.strftime("%Y/%m/%d") + "）から約" + str(days_from_peak) + "日が経過。6ヶ月期日強制決済（" + due_date.strftime("%Y/%m/%d") + " 前後）に伴う処分売りに警戒が必要です。" if is_near_due else status_msg
-status_type = "warning" if is_near_due else status_type
 
 status_title = "🔥 【セリクラ発生中】大底・底入れ接近シグナル" if is_panic_drop else status_title
 status_msg = "直近で買残の大幅な急減（" + f"{int(latest_buy_diff):,}" + "株）を検知。個人投資家のパニック投げ売り・追証整理が進行しており、需給の大底形成シグナルです。" if is_panic_drop else status_msg
-status_type = "error" if is_panic_drop else status_type
 
 st.markdown("---")
 st.markdown("## 🎯 セリクラ（大底）シグナル判定")
