@@ -66,13 +66,14 @@ st.markdown("### 📝 証券会社データの貼り付け")
 input_text = st.text_area("日付 売残 買残 の順（スペース・タブ区切り）", value=sample_text, height=140)
 update_btn = st.button("🔄 このデータで分析を更新する", type="primary")
 
-raw_matches = re.findall(r"(\d{2,4}[/-]\d{1,2}[/-]\d{1,2})[\s\t]+(-?[\d,.]+?)[\s\t]+([\d,.]+)", input_text)
-parsed_dates = [m[0].replace("/", "-") for m in raw_matches]
-parsed_sells = [float(m[1].replace(",", "")) * 1000 for m in raw_matches]
-parsed_buys = [float(m[2].replace(",", "")) * 1000 for m in raw_matches]
+# 年/月/日（例: 26/10/26）を抽出し、先頭の26を厳密に2026年として組み立て
+raw_matches = re.findall(r"(\d{2,4})[/-](\d{1,2})[/-](\d{1,2})[\s\t]+(-?[\d,.]+?)[\s\t]+([\d,.]+)", input_text)
+parsed_dates = [("20" + m[0] if len(m[0]) == 2 else m[0]) + "-" + m[1].zfill(2) + "-" + m[2].zfill(2) for m in raw_matches]
+parsed_sells = [float(m[3].replace(",", "")) * 1000 for m in raw_matches]
+parsed_buys = [float(m[4].replace(",", "")) * 1000 for m in raw_matches]
 
 df = pd.DataFrame({"Date": parsed_dates, "MarginSell": parsed_sells, "MarginBuy": parsed_buys})
-df["Date"] = pd.to_datetime(df["Date"], format="mixed")
+df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d")
 df = df.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 df["Buy_Diff"] = df["MarginBuy"].diff().fillna(0)
 
