@@ -8,10 +8,7 @@ import plotly.graph_objects as go
 from PIL import Image
 st.set_page_config(page_title="Margin OCR Analyzer", layout="wide")
 st.title("📊 信用買残 スクショ画像分析")
-@st.cache_resource
-def load_ocr():
-return easyocr.Reader(["en"])
-reader = load_ocr()
+reader = easyocr.Reader(["en"])
 uploaded_img = st.file_uploader("証券画面のスクショ画像をアップロード", type=["png", "jpg", "jpeg"])
 sample_text = """26/10/26 1146.1 48258.1
 26/10/27 883.6 49160.2
@@ -22,56 +19,23 @@ sample_text = """26/10/26 1146.1 48258.1
 26/11/4 1243.7 53575.5
 26/11/5 1415.6 54163.1
 26/11/6 1272.1 50146.4"""
-extracted_rows = []
-if uploaded_img is not None:
-img = Image.open(uploaded_img).convert("RGB")
-st.image(img, caption="アップロードされた画像", use_container_width=True)
-img_np = np.array(img)
-ocr_results = reader.readtext(img_np)
-all_texts = [r[1].strip() for r in ocr_results]
-cleaned = []
-for t in all_texts:
-t_clean = re.sub(r"[^0-9./]", "", t)
-if len(t_clean) > 0:
-cleaned.append(t_clean)
-for i in range(len(cleaned)):
-token = cleaned[i]
-if "/" in token and len(token) >= 5:
-date_val = token
-nums = []
-for j in range(i + 1, min(i + 5, len(cleaned))):
-candidate = cleaned[j].replace(",", "")
-if "/" not in candidate:
-try:
-nums.append(float(candidate))
-except:
-pass
-if len(nums) >= 2:
-extracted_rows.append([date_val, nums[0], nums[1]])
-if len(extracted_rows) > 0:
-st.success(f"画像から {len(extracted_rows)} 件のデータを検出しました！")
-df_raw = pd.DataFrame(extracted_rows, columns=["DateRaw", "SellRaw", "BuyRaw"]).drop_duplicates(subset=["DateRaw"])
-dates_list = []
-for d in df_raw["DateRaw"]:
-parts = d.split("/")
-if len(parts) == 3:
-y = "20" + parts[0] if len(parts[0]) == 2 else parts[0]
-dates_list.append(f"{y}-{parts[1].zfill(2)}-{parts[2].zfill(2)}")
-else:
-dates_list.append("2026-01-01")
-df = pd.DataFrame({
-"Date": pd.to_datetime(dates_list),
-"Sell": df_raw["SellRaw"].astype(float) * 1000,
-"Buy": df_raw["BuyRaw"].astype(float) * 1000
-}).sort_values("Date").reset_index(drop=True)
-else:
-if uploaded_img is not None:
-st.warning("画像から数値を認識できませんでした。下のサンプルデータで表示します。")
-lines = [re.sub(r"[,/]", " ", l).split() for l in sample_text.strip().splitlines() if len(re.sub(r"[,/]", " ", l).split()) >= 5]
-dates = ["20" + l[0] + "-" + l[1].zfill(2) + "-" + l[2].zfill(2) for l in lines]
-sells = [float(l[3]) * 1000 for l in lines]
-buys = [float(l[4]) * 1000 for l in lines]
-df = pd.DataFrame({"Date": pd.to_datetime(dates), "Sell": sells, "Buy": buys}).sort_values("Date").reset_index(drop=True)
+is_uploaded = uploaded_img is not None
+img = Image.open(uploaded_img).convert("RGB") if is_uploaded else None
+img_np = np.array(img) if is_uploaded else None
+ocr_res = reader.readtext(img_np) if is_uploaded else []
+raw_texts = [r[1].strip() for r in ocr_res]
+cleaned = [re.sub(r"[^0-9./]", "", t) for t in raw_texts if len(re.sub(r"[^0-9./]", "", t)) > 0]
+date_indices = [i for i, t in enumerate(cleaned) if "/" in t and len(t) >= 5]
+ocr_rows = [[cleaned[i]] + [float(cleaned[j].replace(",", "")) for j in range(i+1, min(i+5, len(cleaned))) if "/" not in cleaned[j] and cleaned[j].replace(",", "").replace(".", "").isdigit()][:2] for i in date_indices]
+valid_ocr = [r for r in ocr_rows if len(r) == 3]
+use_ocr = len(valid_ocr) > 0
+df_source = pd.DataFrame(valid_ocr, columns=["DateRaw", "SellRaw", "BuyRaw"]).drop_duplicates(subset=["DateRaw"]) if use_ocr else None
+ocr_dates = [f"20{d.split('/')[0]}-{d.split('/')[1].zfill(2)}-{d.split('/')[2].zfill(2)}" if len(d.split("/"))==3 else "2026-01-01" for d in df_source["DateRaw"]] if use_ocr else []
+fallback_lines = [re.sub(r"[,/]", " ", l).split() for l in sample_text.strip().splitlines() if len(re.sub(r"[,/]", " ", l).split()) >= 5]
+fallback_dates = [f"20{l[0]}-{l[1].zfill(2)}-{l[2].zfill(2)}" for l in fallback_lines]
+fallback_sells = [float(l[3]) * 1000 for l in fallback_lines]
+fallback_buys = [float(l[4]) * 1000 for l in fallback_lines]
+df = pd.DataFrame({"Date": pd.to_datetime(ocr_dates), "Sell": df_source["SellRaw"].astype(float) * 1000, "Buy": df_source["BuyRaw"].astype(float) * 1000}).sort_values("Date").reset_index(drop=True) if use_ocr else pd.DataFrame({"Date": pd.to_datetime(fallback_dates), "Sell": fallback_sells, "Buy": fallback_buys}).sort_values("Date").reset_index(drop=True)
 df["Delta"] = df["Buy"].diff().fillna(0)
 target_idx = st.slider("分析基準日", 0, len(df)-1, len(df)-1)
 curr_date = df.loc[target_idx, "Date"].strftime("%Y-%m-%d")
