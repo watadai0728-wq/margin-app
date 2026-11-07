@@ -4,11 +4,10 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 st.set_page_config(page_title="信用買残ヴィンテージ分析ツール", layout="wide")
-st.title("📊 信用買残 ヴィンテージ（形成時期）分析ツール")
+st.title("信用買残 ヴィンテージ（形成時期）分析ツール")
 st.markdown("""
 公表される信用買残の推移から、「現在の買残がいつ建てられたものか」をFIFO（先入先出）モデルで逆算・推定します。
 """)
---- サイドバー：データ入力・設定 ---
 st.sidebar.header("設定 & データ")
 data_source = st.sidebar.radio("データソース", ["デモ用サンプルデータを生成", "CSVをアップロード"])
 df = None
